@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import fixed_categories
 
 class DatasetManager:
   def __init__(self, dataset_dir="data_storage", time_stamp = ""):
@@ -36,8 +37,11 @@ class DatasetManager:
     if name in self.category_map:
        return self.category_map[name]
     
-    self.category_id_counter+=1
-    cid = self.category_id_counter
+    if name in fixed_categories.FIXED_CATEGORIES:
+       cid = fixed_categories.FIXED_CATEGORIES[name]
+    else:
+       cid = len(self.category_map)+1
+       
     self.category_map[name] = cid
     
     self.coco["categories"].append({

@@ -132,7 +132,9 @@ class DatasetExporter(Node):
               2
            )
 
-           label = self.semantic_map.get(inst_id, str(inst_id))
+           category_id = self.dataset.add_category(self.semantic_map.get(inst_id, "unknown"))
+           label = [k for k, v in self.dataset.category_map.items() if v==category_id][0]
+           print(f"label:{label}")
            cv2.putText(
               bbox_img,
               label,
@@ -148,7 +150,7 @@ class DatasetExporter(Node):
         bbox_2d_dir_name = f"data_storage/bbox_2d_image/{self.dataset.time_str}"
         bbox_2d_path = f"{bbox_2d_dir_name}/{bbox_2d_file_name}"
         os.makedirs(bbox_2d_dir_name, exist_ok=True)
-        bbox_2d_sucess = cv2.imwrite(bbox_2d_path, bbox_img)
+        cv2.imwrite(bbox_2d_path, bbox_img)
 
 
     except Exception as e:

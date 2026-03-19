@@ -19,5 +19,7 @@ dist/
 # logs
 *.log
 
+# data_storage
 data_storage/
 *.json
+*.png
