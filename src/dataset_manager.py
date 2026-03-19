@@ -3,15 +3,19 @@ import json
 import os
 
 class DatasetManager:
-  def __init__(self, dataset_dir="instance_data_storage", time_stamp = ""):
+  def __init__(self, dataset_dir="data_storage", time_stamp = ""):
     self.time_str = time_stamp
     self.dataset_dir = dataset_dir
-    self.instance_image_dir = os.path.join(self.dataset_dir, "image")
+    self.rgb_image_dir = os.path.join(self.dataset_dir, "rgb_image")
+    self.instance_image_dir = os.path.join(self.dataset_dir, "ins_seg_image")
+    self.bbox_2d_image_dir = os.path.join(self.dataset_dir, "bbox_2d_image")
     self.instance_annotation_dir = os.path.join(dataset_dir, "annotations")
     self.instance_date_dir = os.path.join(self.instance_image_dir,self.time_str)
     
     os.makedirs(self.instance_date_dir, exist_ok = True)
+    os.makedirs(self.rgb_image_dir, exist_ok = True)
     os.makedirs(self.instance_image_dir, exist_ok=True)
+    os.makedirs(self.bbox_2d_image_dir, exist_ok = True)
     os.makedirs(self.instance_annotation_dir, exist_ok=True)
 
     self.coco = {
@@ -20,17 +24,28 @@ class DatasetManager:
       "categories":[]
     }
 
+    self.category_id_counter = 0
     self.image_id = 0
     self.annotation_id = 0
+    self.category_map = {}
 
-  def add_category(self, category_id, name):
+  def add_category(self, name):
     """
       新增一個category
     """
+    if name in self.category_map:
+       return self.category_map[name]
+    
+    self.category_id_counter+=1
+    cid = self.category_id_counter
+    self.category_map[name] = cid
+    
     self.coco["categories"].append({
-      "id":category_id,
+      "id":cid,
       "name":name
     })
+    print (self.category_map)
+    return cid
 
   def add_image(self, file_name, width, height, date_capture):
     """
