@@ -2,9 +2,10 @@ import datetime
 import os
 import time
 import json
-
 import rclpy
+
 from rclpy.node import Node
+from message_filters import Subscriber, ApproximateTimeSynchronizer
 
 from sensor_msgs.msg import Image 
 from std_msgs.msg import String
@@ -29,75 +30,55 @@ class DatasetExporter(Node):
     self.bridge = CvBridge()
     self.converter = CocoConverter()
     self.dataset = DatasetManager(time_stamp=self.time_str)
-    self.semantic_map = {}
-    self.latest_rgb = None
-    self.latest_seg = None
+    self.semantic_id_to_name = {}
 
-    self.start_time = time.time()
+    self.rgb_sub = Subscriber(self, Image, "/rgb")
+    self.inst_sub = Subscriber(self, Image, "/instance_segmentation")
+    self.sem_sub = Subscriber(self, Image, "/semantic_segmentation")
 
-    # semantic 訂閱
-    self.semantic_sub = self.create_subscription(
-       String,
-       "/semantic_labels",
-       self.semantic_callback,
-       10
+    self.semantic_label_sub = self.create_subscription(
+         String,
+         "/semantic_labels",
+         self.semantic_callback,
+         10
+      )
+
+    self.ts = ApproximateTimeSynchronizer(
+      [self.rgb_sub, self.inst_sub, self.sem_sub],
+       queue_size = 10,
+       slop = 0.1
     )
 
-    # 建立instance_seg影像訂閱
-    self.inst_seg_sub = self.create_subscription(
-      Image,
-      "/instance_segmentation",
-      self.inst_seg_callback,
-      10
-    )
+    self.ts.registerCallback(self.synced_callback)
+  
+  def synced_callback(self, rgb_msg, inst_msg, sem_msg):
 
-    # 建立rgb 影像訂閱
-    self.rgb_sub = self.create_subscription(
-            Image,
-            "/rgb",
-            self.rgb_callback,
-            10
-         )
-    
-  def rgb_callback(self, msg):
-     print("RGB received")
-     self.latest_rgb = msg
-     self.try_process()
+     if time.time() - self.start_time > 30:
+        print("⏰ Reached 30 seconds, shutting down...")
+        self.destroy_node()
+        rclpy.shutdown()
+        return
+     
+     if len(self.semantic_id_to_name) < 3:
+           print("⚠️ semantic map 還沒準備好")
+           return
+     
+     timestamp = rgb_msg.header.stamp.sec
 
-  def inst_seg_callback(self, msg):
-    print("SEG received")
-    self.latest_seg = msg
-    self.try_process()
+     rgb = self.bridge.imgmsg_to_cv2(rgb_msg, "passthrough")
+     inst = self.bridge.imgmsg_to_cv2(inst_msg, "passthrough")
+     sem = self.bridge.imgmsg_to_cv2(sem_msg, "passthrough")
 
-  # 同步資料處理
-  def try_process(self):
-    print("RGB:", self.latest_rgb is not None, 
-      "SEG:", self.latest_seg is not None)
-    
-    if self.latest_rgb is None or self.latest_seg is None:
-       return
-    
-    if time.time() - self.start_time > 30:
-      print("Reached 30 seconds, shutting down...")
-      rclpy.shutdown()
-      return
-    
-    rgb_msg = self.latest_rgb
-    seg_msg = self.latest_seg
-    timestamp = rgb_msg.header.stamp.sec
+     print(f"inst unique: {np.unique(inst)}")
+     print(f"sem  unique: {np.unique(sem)}")
 
-    self.process_pair(rgb_msg, seg_msg, timestamp)
-    self.process_inst_seg(seg_msg, timestamp)
-
-    self.latest_rgb = None
-    self.latest_seg = None
+     self.process(rgb, inst, sem, timestamp)
+     self.process_inst_seg(inst, sem, timestamp)
 
   # 處理 rgb, bbox2d
-  def process_pair(self, rgb_msg, seg_msg, timestamp):
+  def process(self, rgb, inst, sem, timestamp):
     try:
-        rgb = self.bridge.imgmsg_to_cv2(rgb_msg, desired_encoding="passthrough")
-        seg = self.bridge.imgmsg_to_cv2(seg_msg, desired_encoding="passthrough")
-        instance = self.converter.extract_instances(seg)
+        instance = self.converter.extract_instances(inst)
 
         # 如果是 RGBA → 轉 BGR
         if rgb.shape[-1] == 4:
@@ -113,15 +94,22 @@ class DatasetExporter(Node):
 
         rgb_image_path = f"{rgb_dir_path}/{rgb_file_name}"
 
-        rgb_success = cv2.imwrite(rgb_image_path, rgb)
-        print(f"rgb saved: {rgb_success} → {rgb_image_path}")
+        cv2.imwrite(rgb_image_path, rgb)
 
         # 畫 bbox
         bbox_img = rgb.copy()
 
+        inst_to_class = self.build_inst_to_class(inst, sem)
+
         for inst_id, mask in instance:
+           inst_id = int(inst_id)
+           
+           class_name = inst_to_class.get(inst_id, "unknown")
+
+           category_id = self.dataset.add_category(class_name)
            color = utils.get_color(inst_id)
            color = tuple(int(c) for c in color)
+
            x, y, w, h = self.converter.mask_to_bbox(mask)
 
            cv2.rectangle(
@@ -131,13 +119,9 @@ class DatasetExporter(Node):
               color,
               2
            )
-
-           category_id = self.dataset.add_category(self.semantic_map.get(inst_id, "unknown"))
-           label = [k for k, v in self.dataset.category_map.items() if v==category_id][0]
-           print(f"label:{label}")
            cv2.putText(
               bbox_img,
-              label,
+              class_name,
               (int(x), int(y-5)),
               cv2.FONT_HERSHEY_SIMPLEX,
               0.5,
@@ -157,11 +141,10 @@ class DatasetExporter(Node):
         print("🔥 RGB ERROR:", e)
 
   # 處理instance segmentation 
-  def process_inst_seg(self, seg_msg, timestamp):
-    seg = self.bridge.imgmsg_to_cv2(seg_msg, desired_encoding="passthrough")
-    color_vis = utils.colorize_mask(seg)
+  def process_inst_seg(self, inst, sem, timestamp):
+    color_vis = utils.colorize_mask(inst)
 
-    height, width = seg.shape
+    height, width = inst.shape
     file_name = f"ins_frame_{timestamp}.png"
     ins_seg_image_path = f"data_storage/ins_seg_image/{self.dataset.time_str}/{file_name}"
     cv2.imwrite(ins_seg_image_path, color_vis)
@@ -170,13 +153,19 @@ class DatasetExporter(Node):
     date_capture = datetime.datetime.fromtimestamp(
     os.path.getctime(ins_seg_image_path)
       ).strftime("%Y-%m-%d %H:%M:%S")
-    print(date_capture)
+
     image_id = self.dataset.add_image(file_name, width, height, date_capture)
-    instances = self.converter.extract_instances(seg)
+    instances = self.converter.extract_instances(inst)
+
+    inst_to_class = self.build_inst_to_class(inst, sem)
     
     for inst_id, mask in instances:
-        category_name = self.semantic_map.get(inst_id, "unknown")
-        category_id = self.dataset.add_category(category_name)
+        
+        inst_id = int(inst_id)
+  
+        class_name = inst_to_class.get(inst_id, "unknown")
+
+        category_id = self.dataset.add_category(class_name)
         
         segmentation  = self.converter.mask_to_polygon(mask)
         bbox = self.converter.mask_to_bbox(mask)
@@ -189,30 +178,70 @@ class DatasetExporter(Node):
            area
         )
 
+  def build_inst_to_class(self, inst, sem):
+     mapping = {}
+     inst_ids = np.unique(inst)
 
-   # 偵測檔案中全部標籤
+     for inst_id in inst_ids:
+        if inst_id == 0:
+           continue
+        
+        mask = (inst == inst_id)
+        sem_pixels = sem[mask].astype(np.int64)
+
+        if len(sem_pixels) == 0:
+           continue
+        
+        sem_id = np.bincount(sem_pixels).argmax()
+
+        if sem_id == 0:
+           continue
+        
+        class_name = self.semantic_id_to_name.get(sem_id, "unknown")
+        mapping[inst_id] = class_name
+        print(f"inst={inst_id} → sem={sem_id} → class={class_name}")
+
+     return mapping
+ 
   def semantic_callback(self, msg):
-    data = json.loads(msg.data)
+      data = json.loads(msg.data)
+      new_map = {}
 
-    for k, v in data.items():
-        if not k.isdigit():
-            continue
+      for k, v in data.items():
+         if not k.isdigit():
+               continue
 
-        inst_id = int(k)
+         class_id = int(k)
 
-        # ✅ 只收 dict（最乾淨）
-        if isinstance(v, dict):
-            class_name = list(v.values())[0]
-            self.semantic_map[inst_id] = class_name
+         # 格式 A: {'hospital_bed_01': 'hospital_bed'}
+         if isinstance(v, dict):
+               # 排除 BACKGROUND / UNLABELLED 等保留字
+               inner_val = list(v.values())[0]
+               if isinstance(inner_val, str) and inner_val.upper() not in ("BACKGROUND", "UNLABELLED"):
+                  new_map[class_id] = inner_val.lower()
 
-        # ⚠️ 如果是 "xxx:yyy" 才接受
-        elif isinstance(v, str) and ":" in v:
-            class_name = v.split(":")[-1]
-            self.semantic_map[inst_id] = class_name
+         # 格式 C: "curtain_01:curtain"
+         elif isinstance(v, str) and ":" in v:
+               class_name = v.split(":")[-1].strip().lower()
+               if class_name.upper() not in ("BACKGROUND", "UNLABELLED"):
+                  new_map[class_id] = class_name
 
-        # ❌ 完全忽略 prim path
-        else:
-            continue
+         # 格式 D: "/World/IVPole_0302" → 跳過，無法解析
+         else:
+               pass
+
+      if new_map:
+         # 只用「更好的資料」更新，不允許覆蓋已有的有效 label
+         for k, v in new_map.items():
+               if k not in self.semantic_id_to_name:
+                  self.semantic_id_to_name[k] = v
+                  print(f"  ✅ 新增 sem_id={k} → {v}")
+               else:
+                  print(f"  ⏩ 保留 sem_id={k} → {self.semantic_id_to_name[k]}（忽略新值 {v}）")
+      else:
+         print("⚠️ 忽略無效 semantic_labels")
+
+      print(f"  當前 semantic map: {self.semantic_id_to_name}")
 
   def destroy_node(self):
      self.dataset.save_json()

@@ -25,7 +25,7 @@ class DatasetManager:
       "categories":[]
     }
 
-    self.category_id_counter = 0
+    self.category_id_counter = 500
     self.image_id = 0
     self.annotation_id = 0
     self.category_map = {}
@@ -40,7 +40,8 @@ class DatasetManager:
     if name in fixed_categories.FIXED_CATEGORIES:
        cid = fixed_categories.FIXED_CATEGORIES[name]
     else:
-       cid = len(self.category_map)+1
+       self.category_id_counter += 1
+       cid = self.category_id_counter
        
     self.category_map[name] = cid
     

@@ -1,5 +1,5 @@
 FIXED_CATEGORIES = {
-  "hospital-object":0,
+  "hospital_object":0,
   "TV":1,
   "bedrail":2,
   "bedside_monitor":3,
@@ -68,6 +68,6 @@ FIXED_CATEGORIES = {
   "shower":66,
   "scale":67,
   "gas_manifold":68,
-  "UNLABELLED":998,
+  "unlabelled":998,
   "unknown":999,
 }

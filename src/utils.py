@@ -20,8 +20,7 @@ def colorize_mask (mask):
 
 # 藉由重現不同的inst_id 顏色（局部亂數產生器）
 def get_color(inst_id):
-    if inst_id not in color_map:
-      np.random.seed(inst_id)  
-      color_map[inst_id] = np.random.randint(0, 255, size=3)
-    return color_map[inst_id]
+    np.random.seed(inst_id)   # 🔥 保證跨版本一致
+    color = np.random.randint(0, 255, 3)
+    return tuple(int(c) for c in color)
 
