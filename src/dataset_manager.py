@@ -75,7 +75,7 @@ class DatasetManager:
     #print(self.annotation_id)
     ann = {
       "id": self.annotation_id,
-      "image": image_id,
+      "image_id": image_id,
       "category_id": category_id,
       "segmentation": segmentation,
       "bbox": bbox,
