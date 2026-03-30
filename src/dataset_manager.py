@@ -70,7 +70,7 @@ class DatasetManager:
     return self.image_id
   
   def add_annotation(self, image_id, category_id, segmentation, bbox, area):
-    self.annotation_id += 1
+    self.annotation_id +=1
 
     #print(self.annotation_id)
     ann = {

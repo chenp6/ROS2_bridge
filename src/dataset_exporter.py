@@ -26,6 +26,8 @@ class DatasetExporter(Node):
     self.start_time = time.time()
     now = datetime.datetime.now()
     self.time_str = now.strftime("%Y-%m-%d_%H:%M:%S")
+    self.last_save_time = 0
+    self.save_interval = 0.5
 
     self.bridge = CvBridge()
     self.converter = CocoConverter()
@@ -52,18 +54,24 @@ class DatasetExporter(Node):
     self.ts.registerCallback(self.synced_callback)
   
   def synced_callback(self, rgb_msg, inst_msg, sem_msg):
+     current_time = time.time()
 
-     if time.time() - self.start_time > 30:
+     if current_time - self.start_time > 30:
         print("⏰ Reached 30 seconds, shutting down...")
         self.destroy_node()
         rclpy.shutdown()
         return
      
-     if len(self.semantic_id_to_name) < 3:
-           print("⚠️ semantic map 還沒準備好")
-           return
+     if current_time - self.last_save_time < self.save_interval:
+         return
+
+     self.last_save_time = current_time
      
-     timestamp = rgb_msg.header.stamp.sec
+     if len(self.semantic_id_to_name) < 3:
+         print("⚠️ semantic map 還沒準備好")
+         return
+     
+     timestamp = f"{rgb_msg.header.stamp.sec}_{rgb_msg.header.stamp.nanosec}"
 
      rgb = self.bridge.imgmsg_to_cv2(rgb_msg, "passthrough")
      inst = self.bridge.imgmsg_to_cv2(inst_msg, "passthrough")
@@ -79,6 +87,8 @@ class DatasetExporter(Node):
   def process(self, rgb, inst, sem, timestamp):
     try:
         instance = self.converter.extract_instances(inst)
+        inst_to_class = self.build_inst_to_class(inst, sem)
+        merged_instances = self.merge_instances_by_class(instance, inst_to_class, sem)
 
         # 如果是 RGBA → 轉 BGR
         if rgb.shape[-1] == 4:
@@ -99,18 +109,16 @@ class DatasetExporter(Node):
         # 畫 bbox
         bbox_img = rgb.copy()
 
-        inst_to_class = self.build_inst_to_class(inst, sem)
+        for class_name, mask in merged_instances:
 
-        for inst_id, mask in instance:
-           inst_id = int(inst_id)
-           
-           class_name = inst_to_class.get(inst_id, "unknown")
-
-           category_id = self.dataset.add_category(class_name)
-           color = utils.get_color(inst_id)
+           color = utils.get_color(hash(class_name) % 1000)
            color = tuple(int(c) for c in color)
-
            x, y, w, h = self.converter.mask_to_bbox(mask)
+           h_img, w_img = mask.shape
+
+           if w * h >= 0.95 * (w_img * h_img):
+               print("🔥 BBOX ERROR:", (x, y, w, h))
+               continue
 
            cv2.rectangle(
               bbox_img,
@@ -156,19 +164,20 @@ class DatasetExporter(Node):
 
     image_id = self.dataset.add_image(file_name, width, height, date_capture)
     instances = self.converter.extract_instances(inst)
-
     inst_to_class = self.build_inst_to_class(inst, sem)
+    merged_instances = self.merge_instances_by_class(instances, inst_to_class, sem)
     
-    for inst_id, mask in instances:
-        
-        inst_id = int(inst_id)
-  
-        class_name = inst_to_class.get(inst_id, "unknown")
-
+    for class_name, mask in merged_instances:
         category_id = self.dataset.add_category(class_name)
         
         segmentation  = self.converter.mask_to_polygon(mask)
         bbox = self.converter.mask_to_bbox(mask)
+        h_img, w_img = mask.shape
+
+        if bbox[2] * bbox[3] >= 0.95 * (w_img * h_img):
+            print("🔥 BBOX ERROR:", bbox)
+            continue
+        
         area = self.converter.mask_area(mask)
         self.dataset.add_annotation(
            image_id,
@@ -202,6 +211,38 @@ class DatasetExporter(Node):
         print(f"inst={inst_id} → sem={sem_id} → class={class_name}")
 
      return mapping
+  
+  def merge_instances_by_class(self, inst, inst_to_class, sem):
+      merged = {}
+
+      for inst_id, mask in inst:
+          inst_id = int(inst_id)
+          class_name = inst_to_class.get(inst_id, "unknown")
+
+          # 過濾垃圾訊息
+          if class_name in ["unknown", "unlabelled", "background"]:
+              continue
+          
+          clean_mask = mask.copy().astype(bool)
+
+          sem_pixels = sem[clean_mask].astype(np.int64)
+          if len(sem_pixels) == 0:
+              continue
+          sem_id = np.bincount(sem_pixels).argmax()
+          clean_mask = clean_mask & (sem == sem_id)
+          
+          # 將同一類別的 instance mask 合併
+          if class_name not in merged:
+              merged[class_name] = clean_mask.copy()
+
+          else:
+              merged[class_name] = np.logical_or(merged[class_name], clean_mask)
+      
+      result = []
+      for class_name, merged_mask in merged.items():
+          result.append((class_name, merged_mask.astype(np.uint8)))
+
+      return result    
  
   def semantic_callback(self, msg):
       data = json.loads(msg.data)
