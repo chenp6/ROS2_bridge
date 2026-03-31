@@ -153,8 +153,9 @@ class DatasetExporter(Node):
     color_vis = utils.colorize_mask(inst)
 
     height, width = inst.shape
-    file_name = f"ins_frame_{timestamp}.png"
-    ins_seg_image_path = f"data_storage/ins_seg_image/{self.dataset.time_str}/{file_name}"
+    inst_file_name = f"ins_frame_{timestamp}.png"
+    file_name = f"rgb_frame_{timestamp}.png"
+    ins_seg_image_path = f"data_storage/ins_seg_image/{self.dataset.time_str}/{inst_file_name}"
     cv2.imwrite(ins_seg_image_path, color_vis)
     print(ins_seg_image_path)
 
