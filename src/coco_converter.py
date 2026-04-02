@@ -29,7 +29,7 @@ class CocoConverter:
 
       for contour in contours:
           contour = np.flip(contour, axis=1)   # yx -> xy
-          contour -= 1                         # 因為 pad 了，要扣回來
+          contour -= 1                         # 因為 pad，要扣回來
           segmentation.append(contour.ravel().tolist())
 
     return segmentation 
