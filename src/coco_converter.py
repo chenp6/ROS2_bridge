@@ -20,18 +20,19 @@ class CocoConverter:
 
     return instances
   
-  def mask_to_polygon(mask):
-      # 先補一圈背景
-      padded = np.pad(mask, pad_width=1, mode='constant', constant_values=0)
-
-      contours = measure.find_contours(padded, 0.5)
-      segmentation = []
-
-      for contour in contours:
-          contour = np.flip(contour, axis=1)   # yx -> xy
-          contour -= 1                         # 因為 pad，要扣回來
-          segmentation.append(contour.ravel().tolist())
-
+  def mask_to_polygon(self,mask):
+    """
+      mask -> polygon，找出物件邊界
+    
+    """
+    # 先補一圈背景
+    padded = np.pad(mask, pad_width=1, mode='constant', constant_values=0)
+    contours = measure.find_contours(padded, 0.5)
+    segmentation = []
+    for contour in contours:
+      contour = np.flip(contour, axis=1)   # yx -> xy
+      contour -= 1                         # 因為 pad，要扣回來
+      segmentation.append(contour.ravel().tolist())
     return segmentation 
     
   def mask_to_bbox(self, mask):
