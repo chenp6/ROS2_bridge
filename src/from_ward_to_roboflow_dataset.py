@@ -3,7 +3,7 @@ Convert COCO instance data in a fixed input layout into Roboflow-style split ann
 
 Input layout:
     <input-root>/rgb_image/<tag>_rgb/*.png
-    <input-root>/coco_json/<tag>.json
+    <input-root>/jsonDataset/<tag>.json
 
 Output layout:
     <input-root>/train/_annotations.coco.json
@@ -49,8 +49,8 @@ def parse_args() -> argparse.Namespace:
         "--input-root",
         required=True,
         help=(
-            "輸入根目錄，需包含 rgb_image 與 coco_json。 "
-            "Input root containing rgb_image and coco_json."
+            "輸入根目錄，需包含 rgb_image 與 jsonDataset。 "
+            "Input root containing rgb_image and jsonDataset."
         ),
     )
     parser.add_argument(
@@ -138,15 +138,15 @@ def normalize_ratios(ratios: Sequence[float]) -> Tuple[float, float, float]:
     return tuple(r / total for r in ratios)
 
 
-def collect_coco_json_files(input_root: Path) -> list[Path]:
-    """收集 coco_json 目錄下的標註檔。 Collect annotation files under coco_json."""
-    coco_json_dir = input_root / "coco_json"
-    if not coco_json_dir.is_dir():
-        raise FileNotFoundError(f"COCO json directory not found: {coco_json_dir}")
+def collect_jsonDataset_files(input_root: Path) -> list[Path]:
+    """收集 jsonDataset 目錄下的標註檔。 Collect annotation files under jsonDataset."""
+    jsonDataset_dir = input_root / "jsonDataset"
+    if not jsonDataset_dir.is_dir():
+        raise FileNotFoundError(f"COCO json directory not found: {jsonDataset_dir}")
 
-    json_files = sorted(path for path in coco_json_dir.glob("*.json") if path.is_file())
+    json_files = sorted(path for path in jsonDataset_dir.glob("*.json") if path.is_file())
     if not json_files:
-        raise FileNotFoundError(f"No json files found under {coco_json_dir}")
+        raise FileNotFoundError(f"No json files found under {jsonDataset_dir}")
 
     return json_files
 
@@ -447,7 +447,7 @@ def export_ground_truth_images(
 
 def run_random_split(input_root: Path, args: argparse.Namespace) -> None:
     """Run the merge-and-random-split pipeline."""
-    json_files = collect_coco_json_files(input_root)
+    json_files = collect_jsonDataset_files(input_root)
     merged = merge_coco_files(json_files, input_root)
     if not merged["images"]:
         raise ValueError("No images were found in the input COCO files.")
