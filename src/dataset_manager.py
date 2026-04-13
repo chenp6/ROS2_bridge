@@ -42,14 +42,14 @@ class DatasetManager:
     else:
        self.category_id_counter += 1
        cid = self.category_id_counter
-       
+       print(f"{name}沒有在FIXED_CATEGORIES:被標記成{category_id_counter}")
     self.category_map[name] = cid
     
     self.coco["categories"].append({
       "id":cid,
       "name":name
     })
-    print (self.category_map)
+    # print (self.category_map)
     return cid
 
   def add_image(self, file_name, width, height, date_capture):
