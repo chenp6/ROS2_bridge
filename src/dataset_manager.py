@@ -42,7 +42,7 @@ class DatasetManager:
     else:
        self.category_id_counter += 1
        cid = self.category_id_counter
-       print(f"{name}沒有在FIXED_CATEGORIES:被標記成{category_id_counter}")
+       print(f"{name}沒有在FIXED_CATEGORIES:被標記成{self.category_id_counter}")
     self.category_map[name] = cid
     
     self.coco["categories"].append({
