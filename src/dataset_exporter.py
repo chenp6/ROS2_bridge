@@ -88,7 +88,7 @@ class DatasetExporter(Node):
     try:
         instance = self.converter.extract_instances(inst)
         inst_to_class = self.build_inst_to_class(inst, sem)
-        merged_instances = self.merge_instances_by_class(instance, inst_to_class, sem)
+        #merged_instances = self.merge_instances_by_class(instance, inst_to_class, sem)
 
         # 如果是 RGBA → 轉 BGR
         if rgb.shape[-1] == 4:
@@ -108,9 +108,11 @@ class DatasetExporter(Node):
 
         # 畫 bbox
         bbox_img = rgb.copy()
-
-        for class_name, mask in merged_instances:
-
+        for inst_id, mask in instances:
+           class_name = inst_to_class.get(inst_id, "unknown")
+           if class_name in ["unknown", "unlabelled", "background"]:
+               continue
+      #   for class_name, mask in merged_instances:
            color = utils.get_color(hash(class_name) % 1000)
            color = tuple(int(c) for c in color)
            x, y, w, h = self.converter.mask_to_bbox(mask)
@@ -167,8 +169,11 @@ class DatasetExporter(Node):
     instances = self.converter.extract_instances(inst)
     inst_to_class = self.build_inst_to_class(inst, sem)
     merged_instances = self.merge_instances_by_class(instances, inst_to_class, sem)
-    
-    for class_name, mask in merged_instances:
+   #  for class_name, mask in merged_instances:    
+    for inst_id, mask in instances:
+        class_name = inst_to_class.get(inst_id, "unknown")
+        if class_name in ["unknown", "unlabelled", "background"]:
+            continue
         category_id = self.dataset.add_category(class_name)
         
         segmentation  = self.converter.mask_to_polygon(mask)
