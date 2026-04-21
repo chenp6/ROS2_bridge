@@ -278,13 +278,14 @@ class DatasetExporter(Node):
                pass
 
       if new_map:
+         self.semantic_id_to_name = new_map
          # 只用「更好的資料」更新，不允許覆蓋已有的有效 label
-         for k, v in new_map.items():
-               if k not in self.semantic_id_to_name:
-                  self.semantic_id_to_name[k] = v
-                  print(f"  ✅ 新增 sem_id={k} → {v}")
-               else:
-                  print(f"  ⏩ 保留 sem_id={k} → {self.semantic_id_to_name[k]}（忽略新值 {v}）")
+         # for k, v in new_map.items():
+               # if k not in self.semantic_id_to_name:
+                  # self.semantic_id_to_name[k] = v
+                  # print(f"  ✅ 新增 sem_id={k} → {v}")
+               # else:
+                  # print(f"  ⏩ 保留 sem_id={k} → {self.semantic_id_to_name[k]}（忽略新值 {v}）")
       else:
          print("⚠️ 忽略無效 semantic_labels")
 
