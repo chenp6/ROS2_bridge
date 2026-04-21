@@ -67,7 +67,7 @@ class DatasetExporter(Node):
 
      self.last_save_time = current_time
      
-     if len(self.semantic_id_to_name) < 3:
+     if len(self.semantic_id_to_name) < 1:
          print("⚠️ semantic map 還沒準備好")
          return
      
@@ -278,7 +278,7 @@ class DatasetExporter(Node):
                pass
 
       if new_map:
-         self.semantic_id_to_name = new_map
+         self.semantic_id_to_name.update(new_map)
          # 只用「更好的資料」更新，不允許覆蓋已有的有效 label
          # for k, v in new_map.items():
                # if k not in self.semantic_id_to_name:
