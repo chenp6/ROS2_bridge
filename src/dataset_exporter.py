@@ -86,9 +86,9 @@ class DatasetExporter(Node):
   # 處理 rgb, bbox2d
   def process(self, rgb, inst, sem, timestamp):
     try:
-        instance = self.converter.extract_instances(inst)
+        instances = self.converter.extract_instances(inst)
         inst_to_class = self.build_inst_to_class(inst, sem)
-        #merged_instances = self.merge_instances_by_class(instance, inst_to_class, sem)
+        #merged_instances = self.merge_instances_by_class(instances, inst_to_class, sem)
 
         # 如果是 RGBA → 轉 BGR
         if rgb.shape[-1] == 4:
