@@ -33,8 +33,6 @@ class DatasetExporter(Node):
     self.converter = CocoConverter()
     self.dataset = DatasetManager(time_stamp=self.time_str)
     self.semantic_id_to_name = {}
-    self.semantic_map_by_frame = {}
-    self.semantic_map_ttl_sec = 5.0
 
     self.rgb_sub = Subscriber(self, Image, "/rgb")
     self.inst_sub = Subscriber(self, Image, "/instance_segmentation")
@@ -50,7 +48,7 @@ class DatasetExporter(Node):
     self.ts = ApproximateTimeSynchronizer(
       [self.rgb_sub, self.inst_sub, self.sem_sub],
        queue_size = 10,
-       slop = 0.02
+       slop = 0.1
     )
 
     self.ts.registerCallback(self.synced_callback)
@@ -68,15 +66,10 @@ class DatasetExporter(Node):
          return
 
      self.last_save_time = current_time
-
-     self.purge_stale_semantic_maps(current_time)
-     frame_key = self.frame_key_from_stamp(rgb_msg.header.stamp)
-     frame_entry = self.semantic_map_by_frame.pop(frame_key, None)
-     if frame_entry is None:
-         print(f"⚠️ 找不到對應 frame 的 semantic map，跳過: {frame_key}")
+     
+     if len(self.semantic_id_to_name) < 3:
+         print("⚠️ semantic map 還沒準備好")
          return
-     frame_semantic_map, _ = frame_entry
-     self.semantic_id_to_name = frame_semantic_map
      
      timestamp = f"{rgb_msg.header.stamp.sec}_{rgb_msg.header.stamp.nanosec}"
 
@@ -87,14 +80,14 @@ class DatasetExporter(Node):
      print(f"inst unique: {np.unique(inst)}")
      print(f"sem  unique: {np.unique(sem)}")
 
-     self.process(rgb, inst, sem, timestamp, frame_semantic_map)
-     self.process_inst_seg(inst, sem, timestamp, frame_semantic_map)
+     self.process(rgb, inst, sem, timestamp)
+     self.process_inst_seg(inst, sem, timestamp)
 
   # 處理 rgb, bbox2d
-  def process(self, rgb, inst, sem, timestamp, semantic_map):
+  def process(self, rgb, inst, sem, timestamp):
     try:
         instances = self.converter.extract_instances(inst)
-        inst_to_class = self.build_inst_to_class(inst, sem, semantic_map)
+        inst_to_class = self.build_inst_to_class(inst, sem)
         #merged_instances = self.merge_instances_by_class(instances, inst_to_class, sem)
 
         # 如果是 RGBA → 轉 BGR
@@ -158,7 +151,7 @@ class DatasetExporter(Node):
         print("🔥 RGB ERROR:", e)
 
   # 處理instance segmentation 
-  def process_inst_seg(self, inst, sem, timestamp, semantic_map):
+  def process_inst_seg(self, inst, sem, timestamp):
     color_vis = utils.colorize_mask(inst)
 
     height, width = inst.shape
@@ -174,7 +167,7 @@ class DatasetExporter(Node):
 
     image_id = self.dataset.add_image(file_name, width, height, date_capture)
     instances = self.converter.extract_instances(inst)
-    inst_to_class = self.build_inst_to_class(inst, sem, semantic_map)
+    inst_to_class = self.build_inst_to_class(inst, sem)
     merged_instances = self.merge_instances_by_class(instances, inst_to_class, sem)
    #  for class_name, mask in merged_instances:    
     for inst_id, mask in instances:
@@ -200,7 +193,7 @@ class DatasetExporter(Node):
            area
         )
 
-  def build_inst_to_class(self, inst, sem, semantic_map):
+  def build_inst_to_class(self, inst, sem):
      mapping = {}
      inst_ids = np.unique(inst)
 
@@ -219,7 +212,7 @@ class DatasetExporter(Node):
         if sem_id == 0:
            continue
         
-        class_name = semantic_map.get(int(sem_id), "unknown")
+        class_name = self.semantic_id_to_name.get(sem_id, "unknown")
         mapping[inst_id] = class_name
         print(f"inst={inst_id} → sem={sem_id} → class={class_name}")
 
@@ -260,10 +253,8 @@ class DatasetExporter(Node):
   def semantic_callback(self, msg):
       data = json.loads(msg.data)
       new_map = {}
-      frame_key = self.extract_frame_key_from_semantic_msg(data)
-      labels_payload = self.extract_labels_payload(data)
 
-      for k, v in labels_payload.items():
+      for k, v in data.items():
          if not k.isdigit():
                continue
 
@@ -286,52 +277,18 @@ class DatasetExporter(Node):
          else:
                pass
 
-      if not frame_key:
-         print("⚠️ semantic_labels 缺少 frame_key/stamp，無法對齊影像，忽略此筆")
-         return
-
       if new_map:
-         self.semantic_map_by_frame[frame_key] = (new_map, time.time())
-         print(
-             f"  ✅ 收到 frame map: {frame_key}, labels={len(new_map)}, "
-             f"cache={len(self.semantic_map_by_frame)}"
-         )
+         # 只用「更好的資料」更新，不允許覆蓋已有的有效 label
+         for k, v in new_map.items():
+               if k not in self.semantic_id_to_name:
+                  self.semantic_id_to_name[k] = v
+                  print(f"  ✅ 新增 sem_id={k} → {v}")
+               else:
+                  print(f"  ⏩ 保留 sem_id={k} → {self.semantic_id_to_name[k]}（忽略新值 {v}）")
       else:
          print("⚠️ 忽略無效 semantic_labels")
 
-  def frame_key_from_stamp(self, stamp):
-      return f"{int(stamp.sec)}_{int(stamp.nanosec)}"
-
-  def extract_frame_key_from_semantic_msg(self, data):
-      if isinstance(data, dict):
-         if "frame_key" in data:
-            return str(data["frame_key"])
-         stamp = data.get("stamp")
-         if isinstance(stamp, dict) and "sec" in stamp and "nanosec" in stamp:
-            return f"{int(stamp['sec'])}_{int(stamp['nanosec'])}"
-         if "sec" in data and "nanosec" in data:
-            return f"{int(data['sec'])}_{int(data['nanosec'])}"
-      return None
-
-  def extract_labels_payload(self, data):
-      if isinstance(data, dict):
-         labels = data.get("labels")
-         if isinstance(labels, dict):
-            return labels
-      if isinstance(data, dict):
-         return data
-      return {}
-
-  def purge_stale_semantic_maps(self, current_time):
-      stale_keys = [
-         frame_key
-         for frame_key, (_, saved_at) in self.semantic_map_by_frame.items()
-         if current_time - saved_at > self.semantic_map_ttl_sec
-      ]
-      for frame_key in stale_keys:
-         self.semantic_map_by_frame.pop(frame_key, None)
-      if stale_keys:
-         print(f"🧹 清除過期 frame maps: {len(stale_keys)}")
+      print(f"  當前 semantic map: {self.semantic_id_to_name}")
 
   def destroy_node(self):
      self.dataset.save_json()
